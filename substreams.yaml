@@ -1,0 +1,32 @@
+specVersion: v0.1.0
+package:
+  name: 'substreams_gummy_staking'
+  version: v1.0.0
+
+protobuf:
+  files:
+    - event.proto
+  importPaths:
+    - ./proto
+
+imports:
+  sql: https://github.com/streamingfast/substreams-sink-sql/releases/download/protodefs-v1.0.4/substreams-sink-sql-protodefs-v1.0.4.spkg
+  database_change: https://github.com/streamingfast/substreams-sink-database-changes/releases/download/v1.2.1/substreams-database-change-v1.2.1.spkg
+  entity: https://github.com/streamingfast/substreams-entity-change/releases/download/v0.2.1/substreams-entity-change-v0.2.1.spkg
+  sol: https://spkg.io/streamingfast/solana-explorer-v0.2.0.spkg
+
+binaries:
+  default:
+    type: wasm/rust-v1
+    file: target/wasm32-unknown-unknown/release/gummy_staking.wasm
+
+modules:
+  - name: map_events
+    kind: map
+    inputs:
+      - map: sol:map_block_without_votes 
+    output:
+      type: proto:sf.solana.event.v1.Event
+
+
+network: solana

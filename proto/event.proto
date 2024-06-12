@@ -1,0 +1,7 @@
+syntax = "proto3";
+
+package sf.solana.event.v1;
+
+message Event {
+  string text = 1;
+}
