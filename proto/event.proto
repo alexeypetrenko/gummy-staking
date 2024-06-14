@@ -2,6 +2,10 @@ syntax = "proto3";
 
 package sf.solana.event.v1;
 
+message Events {
+  repeated Event events = 1;
+}
+
 message Event {
   string text = 1;
 }

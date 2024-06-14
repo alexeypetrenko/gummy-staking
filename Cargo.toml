@@ -1,3 +1,4 @@
+workspace = { members = ["event-decode"] }
 [package]
 name = "gummy-staking"
 version = "0.1.0"
@@ -12,6 +13,10 @@ opt-level = 's'
 strip = "debuginfo"
 
 [dependencies]
+anyhow = "1.0.86"
+base64 = "0.22.1"
+borsh = {version = "1.5.1", features = ["derive"]}
+bs58 = "0.5.1"
 prost = "0.11"
 substreams = "0.5.19"
 substreams-database-change = "1.3.1"
