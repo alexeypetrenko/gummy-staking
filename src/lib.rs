@@ -101,7 +101,7 @@ impl TablesWithIncrementingKey {
     }
 
     fn log_error(&mut self, error: &str) {
-        self.create_row_with_incrementing_key("Errors").set("description", error);
+        self.create_row_with_incrementing_key("Error").set("description", error);
     }
 
     fn to_entity_changes(self) -> EntityChanges {
