@@ -26,7 +26,7 @@ modules:
     inputs:
       - map: sol:map_block_without_votes 
     output:
-      type: proto:sf.solana.event.v1.Events
+      type: proto:substreams.entity.v1.EntityChanges
 
 
 network: solana
