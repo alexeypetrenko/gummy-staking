@@ -1,91 +1,126 @@
 mod pb;
 
-use std::fmt::format;
+use std::collections::HashMap;
 
-use anyhow::bail;
-use pb::sf::solana::event::v1::Event;
-use pb::sf::solana::event::v1::Events;
-use substreams_database_change::pb::database::DatabaseChanges;
-use substreams_database_change::tables::Tables as DatabaseChangeTables;
-// use substreams_solana::pb::sol;
+use substreams_database_change::change::AsString;
 use anyhow::Result;
+use base64::prelude::*;
 use borsh::BorshDeserialize;
+use substreams_entity_change::pb::entity::EntityChanges;
+use substreams_entity_change::tables::Row;
+use substreams_entity_change::tables::Tables;
 use substreams_solana::pb::sf::solana::r#type::v1::Block;
 
 #[substreams::handlers::map]
-fn map_events(block: Block) -> Result<Events, substreams::errors::Error> {
-    let mut events: Vec<Event> = Vec::new();
+fn map_events(block: Block) -> Result<EntityChanges, substreams::errors::Error> {
+    let mut tables = TablesWithIncrementingKey::new();
 
     let program_id = "6aw4sBovP6yaG1q4y2GpjaQcLZJbBWMJP4aJFsLKxgb3";
-    let PREFIX = "Program data: ";
+    let log_event_prefix = "Program data: ";
     let start_log_message = format!("Program {program_id} invoke");
     let end_log_message = format!("Program {program_id} success");
 
     // block.transactions.iter().for_each(|tx|
     for tx in block.transactions.iter() {
-        if let Some(meta) = tx.meta.as_ref() {
-            let mut in_program = false;
+        let Some(transaction) = &tx.transaction else {
+            continue;
+        };
+        let tx_sig = bs58::encode(&transaction.signatures[0]).into_string();
+        tables.set_prefix_and_reset_counters(tx_sig);
+        let Some(meta) = tx.meta.as_ref() else {
+            continue;
+        };
 
-            for log_message in meta.log_messages.iter() {
-                if log_message.starts_with(start_log_message.as_str()) {
-                    in_program = true;
-                } else if log_message.starts_with(end_log_message.as_str()) {
-                    in_program = false;
-                } else if in_program && log_message.starts_with(PREFIX) {
-                    if let Some(message) = log_message.strip_prefix(PREFIX) {
-                        let decoded = log_to_event(message);
-                        match decoded {
-                            Ok(event) => {
-                                events.push(Event { text: event });
-                            }
-                            Err(e) => {
-                                let tx_sig = match &tx.transaction {
-                                    Some(transaction) => bs58::encode(&transaction.signatures[0]).into_string(),
-                                    None => "".to_string(),
-                                };
-                                let e_with_context =
-                                    e.context(format!("Error decoding {message}. Transaction signature: {tx_sig}"));
-                                return Err(e_with_context);
-                            }
-                        }
+        let mut in_program = false;
+
+        for log_message in meta.log_messages.iter() {
+            if log_message.starts_with(start_log_message.as_str()) {
+                in_program = true;
+            } else if log_message.starts_with(end_log_message.as_str()) {
+                in_program = false;
+            } else if in_program && log_message.starts_with(log_event_prefix) {
+                let Some(message) = log_message.strip_prefix(log_event_prefix) else {
+                    continue;
+                };
+                //------------------- Parse message to the event ---------------------------------
+                let Ok(base64_decoded_message) = BASE64_STANDARD.decode(message) else {
+                    tables.log_error( "Error decoding base64");
+                    continue;
+                };
+                if base64_decoded_message.len() < 8 {
+                    tables.log_error("Decoded message too short");
+                    continue;
+                }
+                let discriminator = &base64_decoded_message[0..8];
+                let serialized_event = &base64_decoded_message[8..];
+
+                match discriminator {
+                    b"\x3e\xcd\xf2\xaf\xf4\xa9\x88\x34" => {
+                        let event = borsh::from_slice::<Deposit>(serialized_event).unwrap();
+                        tables.create_row_with_incrementing_key("Deposit")
+                        .set("user", event.user.to_string())
+                        .set("amount", event.amount)
+                        .set("total_amount", event.total_amount)
+                        .set("lock_expires", event.lock_expires)
+                        .set("referrer", event.referrer.to_string());
+                    }
+                    _ => {
+                        tables.log_error("Discriminator does not match known events");
                     }
                 }
             }
-        };
+        }
     }
     // );
-
-    Ok(Events { events })
+    Ok(tables.to_entity_changes())
 }
 
-fn log_to_event(message: &str) -> Result<String> {
-    use base64::prelude::*;
-    let base64_decoded_message = match BASE64_STANDARD.decode(message) {
-        Ok(result) => result,
-        Err(error) => {
-            return Err(anyhow::Error::from(error).context("Error decoding base64"));
+struct TablesWithIncrementingKey {
+    tables: Tables,
+    prefix: String,
+    counters: HashMap<String, u64>,
+}
+impl TablesWithIncrementingKey {
+    fn new() -> Self {
+        TablesWithIncrementingKey {
+            tables: Tables::new(),
+            prefix: "".to_string(),
+            counters: HashMap::new(),
         }
-    };
-    if base64_decoded_message.len() < 8 {
-        // return Err(anyhow!("Decoded message too short"));
-        bail!("Decoded message too short");
     }
-    let discriminator = &base64_decoded_message[0..8];
-    let serialized_event = &base64_decoded_message[8..];
+    fn set_prefix_and_reset_counters (&mut self, prefix: String) {
+        self.prefix = prefix;
+        self.counters.clear();
+    } 
 
-    match discriminator {
-        b"\x3e\xcd\xf2\xaf\xf4\xa9\x88\x34\x00" => {
-            let event = borsh::from_slice::<Deposit>(serialized_event).unwrap();
-            return Ok(format!("{event:?}"));
-        }
-        _ => {
-            bail!("Discriminator does not match known events");
-        }
+    fn create_row_with_incrementing_key(&mut self, table: &str) -> &mut Row {
+        let counter = self.counters.entry(table.as_string()).and_modify(|c| {*c+=1}).or_insert(1);
+        let key =  format!("{}-{}", self.prefix, counter);
+
+        self.tables.create_row(table, key)
+    }
+
+    fn log_error(&mut self, error: &str) {
+        self.create_row_with_incrementing_key("Errors").set("description", error);
+    }
+
+    fn to_entity_changes(self) -> EntityChanges {
+        self.tables.to_entity_changes()
     }
 }
 
 #[derive(BorshDeserialize, Debug)]
 struct Pubkey([u8; 32]);
+impl AsRef<[u8]> for Pubkey {
+    fn as_ref(&self) -> &[u8] {
+        &self.0[..]
+    }
+}
+impl Pubkey {
+    fn to_string(&self) -> String {
+        bs58::encode(self.0).into_string()
+    }
+}
 #[derive(BorshDeserialize, Debug)]
 struct Deposit {
     pub user: Pubkey,
