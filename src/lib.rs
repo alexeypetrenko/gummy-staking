@@ -1,14 +1,12 @@
 mod pb;
+mod tables_with_incrementing_key;
+use tables_with_incrementing_key::TablesWithIncrementingKey;
 
-use std::collections::HashMap;
 
-use substreams_database_change::change::AsString;
 use anyhow::Result;
 use base64::prelude::*;
 use borsh::BorshDeserialize;
 use substreams_entity_change::pb::entity::EntityChanges;
-use substreams_entity_change::tables::Row;
-use substreams_entity_change::tables::Tables;
 use substreams_entity_change::tables::ToValue;
 use substreams_solana::pb::sf::solana::r#type::v1::Block;
 
@@ -88,39 +86,6 @@ impl SetIfSome for substreams_entity_change::tables::Row {
     }
 }
 
-struct TablesWithIncrementingKey {
-    tables: Tables,
-    prefix: String,
-    counters: HashMap<String, u64>,
-}
-impl TablesWithIncrementingKey {
-    fn new() -> Self {
-        TablesWithIncrementingKey {
-            tables: Tables::new(),
-            prefix: "".to_string(),
-            counters: HashMap::new(),
-        }
-    }
-    fn set_prefix_and_reset_counters (&mut self, prefix: String) {
-        self.prefix = prefix;
-        self.counters.clear();
-    } 
-
-    fn create_row_with_incrementing_key(&mut self, table: &str) -> &mut Row {
-        let counter = self.counters.entry(table.as_string()).and_modify(|c| {*c+=1}).or_insert(1);
-        let key =  format!("{}-{}", self.prefix, counter);
-
-        self.tables.create_row(table, key)
-    }
-
-    fn log_error(&mut self, error: &str) {
-        self.create_row_with_incrementing_key("Error").set("description", error);
-    }
-
-    fn to_entity_changes(self) -> EntityChanges {
-        self.tables.to_entity_changes()
-    }
-}
 
 #[derive(BorshDeserialize, Debug)]
 struct Pubkey([u8; 32]);
