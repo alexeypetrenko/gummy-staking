@@ -1,11 +1,10 @@
 mod pb;
 mod tables_with_incrementing_key;
+mod events;
+
 use tables_with_incrementing_key::TablesWithIncrementingKey;
-
-
 use anyhow::Result;
 use base64::prelude::*;
-use borsh::BorshDeserialize;
 use substreams_entity_change::pb::entity::EntityChanges;
 use substreams_entity_change::tables::ToValue;
 use substreams_solana::pb::sf::solana::r#type::v1::Block;
@@ -54,7 +53,7 @@ fn map_events(block: Block) -> Result<EntityChanges, substreams::errors::Error> 
 
                 match discriminator {
                     b"\x3e\xcd\xf2\xaf\xf4\xa9\x88\x34" => {
-                        let event = borsh::from_slice::<Deposit>(serialized_event).unwrap();
+                        let event = borsh::from_slice::<events::Deposit>(serialized_event).unwrap();
                         tables.create_row_with_incrementing_key("Deposit")
                         .set_if_some("timestamp", block.block_time.as_ref().map(|x|{x.timestamp}))
                         .set("user", event.user.to_string())
@@ -86,24 +85,3 @@ impl SetIfSome for substreams_entity_change::tables::Row {
     }
 }
 
-
-#[derive(BorshDeserialize, Debug)]
-struct Pubkey([u8; 32]);
-impl AsRef<[u8]> for Pubkey {
-    fn as_ref(&self) -> &[u8] {
-        &self.0[..]
-    }
-}
-impl Pubkey {
-    fn to_string(&self) -> String {
-        bs58::encode(self.0).into_string()
-    }
-}
-#[derive(BorshDeserialize, Debug)]
-struct Deposit {
-    pub user: Pubkey,
-    pub amount: u64,
-    pub total_amount: u64,
-    pub lock_expires: u32,
-    pub referrer: Pubkey,
-}
