@@ -9,7 +9,9 @@ use borsh::BorshDeserialize;
 use substreams_entity_change::pb::entity::EntityChanges;
 use substreams_entity_change::tables::Row;
 use substreams_entity_change::tables::Tables;
+use substreams_entity_change::tables::ToValue;
 use substreams_solana::pb::sf::solana::r#type::v1::Block;
+use substreams_solana::pb::sf::solana::r#type::v1::UnixTimestamp;
 
 #[substreams::handlers::map]
 fn map_events(block: Block) -> Result<EntityChanges, substreams::errors::Error> {
@@ -20,7 +22,6 @@ fn map_events(block: Block) -> Result<EntityChanges, substreams::errors::Error> 
     let start_log_message = format!("Program {program_id} invoke");
     let end_log_message = format!("Program {program_id} success");
 
-    // block.transactions.iter().for_each(|tx|
     for tx in block.transactions.iter() {
         let Some(transaction) = &tx.transaction else {
             continue;
@@ -58,6 +59,7 @@ fn map_events(block: Block) -> Result<EntityChanges, substreams::errors::Error> 
                     b"\x3e\xcd\xf2\xaf\xf4\xa9\x88\x34" => {
                         let event = borsh::from_slice::<Deposit>(serialized_event).unwrap();
                         tables.create_row_with_incrementing_key("Deposit")
+                        .set_if_some("timestamp", block.block_time.as_ref().map(|x|{x.timestamp}))
                         .set("user", event.user.to_string())
                         .set("amount", event.amount)
                         .set("total_amount", event.total_amount)
@@ -71,8 +73,20 @@ fn map_events(block: Block) -> Result<EntityChanges, substreams::errors::Error> 
             }
         }
     }
-    // );
+
     Ok(tables.to_entity_changes())
+}
+
+trait SetIfSome {
+    fn set_if_some<T: ToValue>(&mut self, name: &str, value: Option<T>) -> &mut Self;
+}
+impl SetIfSome for substreams_entity_change::tables::Row {
+    fn set_if_some<T: ToValue>(&mut self, name: &str, value: Option<T>) -> &mut Self {
+        match value {
+           Some(value) => self.set(name, value),
+           None => self 
+        }
+    }
 }
 
 struct TablesWithIncrementingKey {
