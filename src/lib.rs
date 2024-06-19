@@ -11,7 +11,6 @@ use substreams_entity_change::tables::Row;
 use substreams_entity_change::tables::Tables;
 use substreams_entity_change::tables::ToValue;
 use substreams_solana::pb::sf::solana::r#type::v1::Block;
-use substreams_solana::pb::sf::solana::r#type::v1::UnixTimestamp;
 
 #[substreams::handlers::map]
 fn map_events(block: Block) -> Result<EntityChanges, substreams::errors::Error> {
