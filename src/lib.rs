@@ -1,13 +1,13 @@
+mod events;
 mod pb;
 mod tables_with_incrementing_key;
-mod events;
 
-use tables_with_incrementing_key::TablesWithIncrementingKey;
 use anyhow::Result;
 use base64::prelude::*;
 use substreams_entity_change::pb::entity::EntityChanges;
 use substreams_entity_change::tables::ToValue;
 use substreams_solana::pb::sf::solana::r#type::v1::Block;
+use tables_with_incrementing_key::TablesWithIncrementingKey;
 
 #[substreams::handlers::map]
 fn map_events(block: Block) -> Result<EntityChanges, substreams::errors::Error> {
@@ -41,7 +41,7 @@ fn map_events(block: Block) -> Result<EntityChanges, substreams::errors::Error> 
                 };
                 //------------------- Parse message to the event ---------------------------------
                 let Ok(base64_decoded_message) = BASE64_STANDARD.decode(message) else {
-                    tables.log_error( "Error decoding base64");
+                    tables.log_error("Error decoding base64");
                     continue;
                 };
                 if base64_decoded_message.len() < 8 {
@@ -52,15 +52,87 @@ fn map_events(block: Block) -> Result<EntityChanges, substreams::errors::Error> 
                 let serialized_event = &base64_decoded_message[8..];
 
                 match discriminator {
-                    b"\x3e\xcd\xf2\xaf\xf4\xa9\x88\x34" => {
-                        let event = borsh::from_slice::<events::Deposit>(serialized_event).unwrap();
-                        tables.create_row_with_incrementing_key("Deposit")
-                        .set_if_some("timestamp", block.block_time.as_ref().map(|x|{x.timestamp}))
-                        .set("user", event.user.to_string())
-                        .set("amount", event.amount)
-                        .set("total_amount", event.total_amount)
-                        .set("lock_expires", event.lock_expires)
-                        .set("referrer", event.referrer.to_string());
+                    events::DISCRIMINATOR_DEPOSIT => {
+                        let event_name = "Deposit";
+                        match borsh::from_slice::<events::Deposit>(serialized_event) {
+                            Err(e) => tables.log_error(&format!("Error deserializing event '{event_name}': '{e}'. Log is {message}.")),
+                            Ok(event) => {
+                                tables
+                                    .create_row_with_incrementing_key(&format!("{event_name}Event"))
+                                    .set_if_some(
+                                        "timestamp",
+                                        block.block_time.as_ref().map(|x| x.timestamp),
+                                    )
+                                    .set("user", event.user.to_string())
+                                    .set("amount", event.amount)
+                                    .set("total_amount", event.total_amount)
+                                    .set("lock_expires", event.lock_expires)
+                                    .set("referrer", event.referrer.to_string());
+                            }
+                        }
+                    }
+                    events::DISCRIMINATOR_WITHDRAW => {
+                        let event_name = "Withdraw";
+                        match borsh::from_slice::<events::Withdraw>(serialized_event) {
+                            Err(e) => tables.log_error(&format!("Error deserializing event '{event_name}': '{e}'. Log is {message}.")),
+                            Ok(event) => {
+                                tables
+                                    .create_row_with_incrementing_key(&format!("{event_name}Event"))
+                                    .set_if_some(
+                                        "timestamp",
+                                        block.block_time.as_ref().map(|x| x.timestamp),
+                                    )
+                                    .set("user", event.user.to_string())
+                                    .set("total_amount", event.total_amount);
+                            }
+                        }
+                    }
+                    events::DISCRIMINATOR_SET_REFERRER => {
+                        let event_name = "SetReferrer";
+                        match borsh::from_slice::<events::SetReferrer>(serialized_event) {
+                            Err(e) => tables.log_error(&format!("Error deserializing event '{event_name}': '{e}'. Log is {message}.")),
+                            Ok(event) => {
+                                tables
+                                .tables
+                                    .create_row("Referrer", event.user.to_string())
+                                    .set("referrer", event.new_referrer.to_string());
+                            }
+                        }
+                    }
+                    events::DISCRIMINATOR_REGISTER_SHORT_REFERRER => {
+                        let event_name = "RegisterShortReferrer";
+                        match borsh::from_slice::<events::RegisterShortReferrer>(serialized_event) {
+                            Err(e) => tables.log_error(&format!("Error deserializing event '{event_name}': '{e}'. Log is {message}.")),
+                            Ok(event) => {
+                                tables
+                                .tables
+                                    .create_row("ShortReferrer", String::from_utf8_lossy(event.short.as_ref()))
+                                    .set("full", event.full.to_string());
+                            }
+                        }
+                    }
+                    events::DISCRIMINATOR_ADMIN_REGISTER_SHORT_REFERRER => {
+                        let event_name = "AdminRegisterShortReferrer";
+                        match borsh::from_slice::<events::AdminRegisterShortReferrer>(serialized_event) {
+                            Err(e) => tables.log_error(&format!("Error deserializing event '{event_name}': '{e}'. Log is {message}.")),
+                            Ok(event) => {
+                                tables
+                                .tables
+                                    .create_row("ShortReferrer", String::from_utf8_lossy(event.short.as_ref()))
+                                    .set("full", event.full.to_string());
+                            }
+                        }
+                    }
+                    events::DISCRIMINATOR_ADMIN_DELETE_SHORT_REFERRER => {
+                        let event_name = "AdminDeleteShortReferrer";
+                        match borsh::from_slice::<events::AdminDeleteShortReferrer>(serialized_event) {
+                            Err(e) => tables.log_error(&format!("Error deserializing event '{event_name}': '{e}'. Log is {message}.")),
+                            Ok(event) => {
+                                tables
+                                .tables
+                                    .delete_row("ShortReferrer", String::from_utf8_lossy(event.short.as_ref()));
+                            }
+                        }
                     }
                     _ => {
                         tables.log_error("Discriminator does not match known events");
@@ -79,9 +151,8 @@ trait SetIfSome {
 impl SetIfSome for substreams_entity_change::tables::Row {
     fn set_if_some<T: ToValue>(&mut self, name: &str, value: Option<T>) -> &mut Self {
         match value {
-           Some(value) => self.set(name, value),
-           None => self 
+            Some(value) => self.set(name, value),
+            None => self,
         }
     }
 }
-
