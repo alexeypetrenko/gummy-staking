@@ -134,6 +134,21 @@ fn map_events(block: Block) -> Result<EntityChanges, substreams::errors::Error> 
                             }
                         }
                     }
+                    events::DISCRIMINATOR_ADMIN_EMERGENCY_WITHDRAW => {
+                        match borsh::from_slice::<events::AdminEmergencyWithdraw>(serialized_event) {
+                            Err(e) => tables.log_error(&format!("Error deserializing event 'AdminEmergencyWithdraw': '{e}'. Log is {message}.")),
+                            Ok(event) => {
+                                tables
+                                    .create_row_with_incrementing_key(&format!("WithdrawEvent"))
+                                    .set_if_some(
+                                        "timestamp",
+                                        block.block_time.as_ref().map(|x| x.timestamp),
+                                    )
+                                    .set("user", event.user.to_string())
+                                    .set("total_amount", event.total_amount);
+                            }
+                        }
+                    }
                     _ => {
                         tables.log_error("Discriminator does not match known events");
                     }

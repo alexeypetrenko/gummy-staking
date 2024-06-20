@@ -60,3 +60,11 @@ pub struct AdminDeleteShortReferrer {
     pub short: Vec<u8>,
     pub initiator: Pubkey,
 }
+
+pub const DISCRIMINATOR_ADMIN_EMERGENCY_WITHDRAW: &[u8] = b"\x65\xa3\xa1\x8b\xa3\x9d\x9d\xe3";
+#[derive(BorshDeserialize, Debug)]
+pub struct AdminEmergencyWithdraw {
+    pub user: Pubkey,
+    pub total_amount: u64,
+    pub initiator: Pubkey,
+}
